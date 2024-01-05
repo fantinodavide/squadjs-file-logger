@@ -1,0 +1,4 @@
+**/*
+!.gitignore
+!README.md
+!file-logger.js
