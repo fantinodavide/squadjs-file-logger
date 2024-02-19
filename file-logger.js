@@ -60,7 +60,7 @@ export default class FileLogger extends DiscordBasePlugin {
     }
 
     saveToFile(...data) {
-        const stringified = data.map(p => JSON.stringify(p, this.circularReplacer)?.replace(/\\u001b\[[0-9]+m/g, '')?.replace(/^"|"$/g, '')).join(' ');
+        const stringified = data.map(p => JSON.stringify(p, this.createCircularReplacer())?.replace(/\\u001b\[[0-9]+m/g, '')?.replace(/^"|"$/g, '')).join(' ');
         appendToFile(stringified)
 
         function appendToFile(content) {
@@ -106,16 +106,27 @@ export default class FileLogger extends DiscordBasePlugin {
         }
     }
 
-    circularReplacer() {
-        const visited = new WeakSet();
-        return (key, value) => {
+    createCircularReplacer() {
+        const seenObjects = new Map();
+
+        return function replacer(key, value) {
+            const path = seenObjects.get(this) || "";
+            const newPath = path ? path + "." + key : key;
+
             if (typeof value === "object" && value !== null) {
-                if (visited.has(value)) {
-                    return;
+                if (seenObjects.has(value)) {
+                    // Check if the current path starts with the path of the first occurrence of the object
+                    // This indicates a circular reference
+                    if (newPath.startsWith(seenObjects.get(value))) {
+                        return "[Circular]";
+                    }
+                } else {
+                    // Store the path to the current object for potential future circular reference checks
+                    seenObjects.set(value, newPath);
                 }
-                visited.add(value);
             }
+
             return value;
         };
-    };
+    }
 }
