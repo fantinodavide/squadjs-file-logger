@@ -54,13 +54,13 @@ export default class FileLogger extends DiscordBasePlugin {
 
     consoleError(...data) {
         orConsoleError(...data);
-        
+
         data.unshift('[ERROR]')
         this.saveToFile(...data);
     }
 
     saveToFile(...data) {
-        const stringified = data.map(p => JSON.stringify(p)?.replace(/\\u001b\[[0-9]+m/g, '')?.replace(/^"|"$/g, '')).join(' ');
+        const stringified = data.map(p => JSON.stringify(p, this.circularReplacer)?.replace(/\\u001b\[[0-9]+m/g, '')?.replace(/^"|"$/g, '')).join(' ');
         appendToFile(stringified)
 
         function appendToFile(content) {
@@ -105,4 +105,17 @@ export default class FileLogger extends DiscordBasePlugin {
             }
         }
     }
+
+    circularReplacer() {
+        const visited = new WeakSet();
+        return (key, value) => {
+            if (typeof value === "object" && value !== null) {
+                if (visited.has(value)) {
+                    return;
+                }
+                visited.add(value);
+            }
+            return value;
+        };
+    };
 }
