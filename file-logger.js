@@ -1,11 +1,11 @@
 import DiscordBasePlugin from './discord-base-plugin.js';
 import path from 'path';
 import fs from 'fs';
+import { inspect } from 'node:util';
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const logPath = path.join('.', 'squadjs-logs', 'squadjs.log');
 const orConsoleLog = console.log;
-const orConsoleError = console.error;
 
 export default class FileLogger extends DiscordBasePlugin {
     static get description() {
@@ -32,11 +32,12 @@ export default class FileLogger extends DiscordBasePlugin {
         super(server, options, connectors);
 
         this.consoleLog = this.consoleLog.bind(this);
-        this.consoleError = this.consoleError.bind(this);
+        this.onUncaughtException = this.onUncaughtException.bind(this);
         this.saveToFile = this.saveToFile.bind(this);
 
         console.log = this.consoleLog;
-        console.error = this.consoleError;
+
+        process.on('uncaughtException', this.onUncaughtException);
 
         this.rotateLogFile();
     }
@@ -52,15 +53,13 @@ export default class FileLogger extends DiscordBasePlugin {
         this.saveToFile(...data);
     }
 
-    consoleError(...data) {
-        orConsoleError(...data);
-
+    onUncaughtException(...data) {
         data.unshift('[ERROR]')
         this.saveToFile(...data);
     }
 
     saveToFile(...data) {
-        const stringified = data.map(p => JSON.stringify(p, this.createCircularReplacer())?.replace(/\\u001b\[[0-9]+m/g, '')?.replace(/^"|"$/g, '')).join(' ');
+        const stringified = data.map(p => inspect((typeof p === 'string' ? p.replace(ansiRegex(), '') : p), { compact: true, breakLength: Infinity, colors: false, depth: 4 }).replace(/(^"|')|("|'$)/g, '')).join(' ');
         appendToFile(stringified)
 
         function appendToFile(content) {
@@ -129,4 +128,13 @@ export default class FileLogger extends DiscordBasePlugin {
             return value;
         };
     }
+}
+
+function ansiRegex({ onlyFirst = false } = {}) {
+    const pattern = [
+        '[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]+)*|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]*)*)?\\u0007)',
+        '(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))'
+    ].join('|');
+
+    return new RegExp(pattern, onlyFirst ? undefined : 'g');
 }
