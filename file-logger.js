@@ -45,13 +45,14 @@ export default class FileLogger extends DiscordBasePlugin {
 
         this.logQueue = [];
         this.isDiscordReady = false;
+
+        this.rotateLogFile();
     }
 
     async mount() {
         this.verbose(1, 'FileLogger Mounted');
         this.isDiscordReady = true;
         this.processLogQueue();
-        this.rotateLogFile();
     }
 
     async unmount() { }
