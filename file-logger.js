@@ -1,5 +1,5 @@
 import DiscordBasePlugin from './discord-base-plugin.js';
-import { MessageAttachment } from "discord.js";
+import { AttachmentBuilder } from "discord.js";
 import path from 'path';
 import fs from 'fs';
 import { inspect } from 'node:util';
@@ -191,7 +191,7 @@ export default class FileLogger extends DiscordBasePlugin {
             });
             await this.sendDiscordMessage({
                 files: [
-                    new MessageAttachment(buffer, fileName)
+                    new AttachmentBuilder(buffer, { name: fileName })
                 ]
             });
         } catch (error) {
