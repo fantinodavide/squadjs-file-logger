@@ -89,18 +89,25 @@ export default class FileLogger extends DiscordBasePlugin {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             const newFile = path.join(dir, `${base}_${timestamp}${ext}`);
 
+            // Rename the current log file
             fs.renameSync(logFile, newFile);
 
-            const allLogFiles = fs.readdirSync(dir).filter(file => file.startsWith(`${base}_`));
+            // Get all log files (including the newly renamed one)
+            const allLogFiles = fs.readdirSync(dir).filter(file =>
+                file.startsWith(`${base}_`) || file === `${base}${ext}`
+            );
 
-            const sortedLogFiles = allLogFiles.sort((a, b) => fs.statSync(path.join(dir, b)).ctime.getTime() - fs.statSync(path.join(dir, a)).ctime.getTime());
+            // Sort log files by creation time (oldest first)
+            const sortedLogFiles = allLogFiles.sort((a, b) =>
+                fs.statSync(path.join(dir, a)).ctime.getTime() -
+                fs.statSync(path.join(dir, b)).ctime.getTime()
+            );
 
-            if (sortedLogFiles.length > maxLogFiles) {
-                const filesToDelete = sortedLogFiles.slice(maxLogFiles);
-                filesToDelete.forEach(file => {
-                    const filePath = path.join(dir, file);
-                    fs.unlinkSync(filePath);
-                });
+            // If we have more than maxLogFiles, delete the oldest ones
+            while (sortedLogFiles.length > maxLogFiles) {
+                const oldestFile = sortedLogFiles.shift(); // Remove and get the oldest file
+                const filePath = path.join(dir, oldestFile);
+                fs.unlinkSync(filePath);
             }
         }
     }
