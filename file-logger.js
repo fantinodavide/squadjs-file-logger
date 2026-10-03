@@ -6,6 +6,7 @@ import { inspect } from 'node:util';
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const logPath = path.join('.', 'squadjs-logs', 'squadjs.log');
 const orConsoleLog = console.log;
+const orStderrWrite = process.stderr.write.bind(process.stderr);
 
 export default class FileLogger extends DiscordBasePlugin {
     static get description() {
@@ -34,8 +35,12 @@ export default class FileLogger extends DiscordBasePlugin {
         this.consoleLog = this.consoleLog.bind(this);
         this.onUncaughtException = this.onUncaughtException.bind(this);
         this.saveToFile = this.saveToFile.bind(this);
+        this.stderrWrite = this.stderrWrite.bind(this);
 
         console.log = this.consoleLog;
+        // Node warnings (for example MaxListenersExceededWarning or unhandled rejections) and
+        // console.error/console.warn are written to stderr, not through console.log.
+        process.stderr.write = this.stderrWrite;
 
         process.on('uncaughtException', this.onUncaughtException);
 
@@ -51,6 +56,12 @@ export default class FileLogger extends DiscordBasePlugin {
     consoleLog(...data) {
         orConsoleLog(...data);
         this.saveToFile(...data);
+    }
+
+    stderrWrite(chunk, encoding, callback) {
+        const text = (typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8')).replace(/\n$/, '');
+        if (text) this.saveToFile('[STDERR]', text);
+        return orStderrWrite(chunk, encoding, callback);
     }
 
     onUncaughtException(...data) {
