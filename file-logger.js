@@ -7,6 +7,7 @@ import { createGzip } from 'zlib';
 
 const logPath = path.join('.', 'squadjs-logs', 'squadjs.log');
 const orConsoleLog = console.log;
+const orStderrWrite = process.stderr.write.bind(process.stderr);
 
 export default class FileLogger extends DiscordBasePlugin {
     static get description() {
@@ -38,8 +39,12 @@ export default class FileLogger extends DiscordBasePlugin {
         this.sendLogToDiscord = this.sendLogToDiscord.bind(this);
         this.gzipFile = this.gzipFile.bind(this);
         this.discordMessage = this.discordMessage.bind(this);
+        this.stderrWrite = this.stderrWrite.bind(this);
 
         console.log = this.consoleLog;
+        // Node warnings (for example MaxListenersExceededWarning or unhandled rejections) and
+        // console.error/console.warn are written to stderr, not through console.log.
+        process.stderr.write = this.stderrWrite;
 
         process.on('uncaughtException', this.onUncaughtException);
 
@@ -60,6 +65,12 @@ export default class FileLogger extends DiscordBasePlugin {
     consoleLog(...data) {
         orConsoleLog(...data);
         this.saveToFile(...data);
+    }
+
+    stderrWrite(chunk, encoding, callback) {
+        const text = (typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8')).replace(/\n$/, '');
+        if (text) this.saveToFile('[STDERR]', text);
+        return orStderrWrite(chunk, encoding, callback);
     }
 
     onUncaughtException(...data) {
