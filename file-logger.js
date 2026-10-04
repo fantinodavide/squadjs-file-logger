@@ -1,16 +1,17 @@
 import DiscordBasePlugin from './discord-base-plugin.js';
+import { AttachmentBuilder } from "discord.js";
 import path from 'path';
 import fs from 'fs';
 import { inspect } from 'node:util';
+import { createGzip } from 'zlib';
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const logPath = path.join('.', 'squadjs-logs', 'squadjs.log');
 const orConsoleLog = console.log;
 const orStderrWrite = process.stderr.write.bind(process.stderr);
 
 export default class FileLogger extends DiscordBasePlugin {
     static get description() {
-        return '';
+        return 'File logger with Discord integration';
     }
 
     static get defaultEnabled() {
@@ -35,6 +36,9 @@ export default class FileLogger extends DiscordBasePlugin {
         this.consoleLog = this.consoleLog.bind(this);
         this.onUncaughtException = this.onUncaughtException.bind(this);
         this.saveToFile = this.saveToFile.bind(this);
+        this.sendLogToDiscord = this.sendLogToDiscord.bind(this);
+        this.gzipFile = this.gzipFile.bind(this);
+        this.discordMessage = this.discordMessage.bind(this);
         this.stderrWrite = this.stderrWrite.bind(this);
 
         console.log = this.consoleLog;
@@ -44,11 +48,16 @@ export default class FileLogger extends DiscordBasePlugin {
 
         process.on('uncaughtException', this.onUncaughtException);
 
+        this.logQueue = [];
+        this.isDiscordReady = false;
+
         this.rotateLogFile();
     }
 
     async mount() {
-        this.verbose(1, 'Mounted')
+        this.verbose(1, 'FileLogger Mounted');
+        this.isDiscordReady = true;
+        this.processLogQueue();
     }
 
     async unmount() { }
@@ -65,28 +74,28 @@ export default class FileLogger extends DiscordBasePlugin {
     }
 
     onUncaughtException(...data) {
-        data.unshift('[ERROR]')
+        data.unshift('[ERROR]');
         this.saveToFile(...data);
     }
 
     saveToFile(...data) {
         const stringified = data.map(p => inspect((typeof p === 'string' ? p.replace(ansiRegex(), '') : p), { compact: true, breakLength: Infinity, colors: false, depth: 4 }).replace(/(^"|')|("|'$)/g, '')).join(' ');
-        appendToFile(stringified)
+        this.appendToFile(stringified);
+    }
 
-        function appendToFile(content) {
-            content = `[${(new Date()).toISOString()}] ${content}`
-            const filePath = logPath;
+    appendToFile(content) {
+        content = `[${(new Date()).toISOString()}] ${content}`;
+        const filePath = logPath;
 
-            const dir = path.dirname(filePath);
+        const dir = path.dirname(filePath);
 
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-
-            fs.appendFile(filePath, content + "\n", (err) => {
-                if (err) throw err;
-            });
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
         }
+
+        fs.appendFile(filePath, content + "\n", (err) => {
+            if (err) throw err;
+        });
     }
 
     rotateLogFile() {
@@ -119,6 +128,96 @@ export default class FileLogger extends DiscordBasePlugin {
                 const oldestFile = sortedLogFiles.shift(); // Remove and get the oldest file
                 const filePath = path.join(dir, oldestFile);
                 fs.unlinkSync(filePath);
+            }
+
+            // Send the rotated log file to Discord
+            this.sendLogToDiscord(newFile).catch(error => {
+                this.verbose(1, `Error sending log to Discord: ${error.message}`);
+            });
+        }
+    }
+
+    async sendLogToDiscord(logFilePath) {
+        if (!logFilePath || typeof logFilePath !== 'string') {
+            throw new Error(`Invalid logFilePath: ${logFilePath}`);
+        }
+
+        this.verbose(1, `Attempting to send log file: ${logFilePath}`);
+
+        if (!fs.existsSync(logFilePath)) {
+            throw new Error(`Log file does not exist: ${logFilePath}`);
+        }
+
+        const gzFileName = path.basename(logFilePath) + '.gz';
+        const logFileSize = fs.statSync(logFilePath).size / 1024 / 1024;
+        this.verbose(1, 'Log file rotated:', logFilePath, logFileSize);
+
+        try {
+            const buffer = await this.gzipFile(logFilePath);
+            await this.discordMessage(gzFileName, buffer);
+        } catch (error) {
+            this.verbose(1, `Error processing log file: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async gzipFile(filePath) {
+        return new Promise((resolve, reject) => {
+            if (!fs.existsSync(filePath)) {
+                reject(new Error(`File does not exist: ${filePath}`));
+                return;
+            }
+
+            const source = fs.createReadStream(filePath);
+            const gzip = createGzip();
+            const chunks = [];
+
+            gzip.on('data', (chunk) => chunks.push(chunk));
+            gzip.on('end', () => resolve(Buffer.concat(chunks)));
+            gzip.on('error', (error) => reject(error));
+
+            source.on('error', (error) => reject(error));
+
+            source.pipe(gzip);
+        });
+    }
+
+    async discordMessage(fileName, buffer) {
+        if (!this.isDiscordReady) {
+            this.verbose(1, 'Discord not ready. Queuing message.');
+            this.logQueue.push({ fileName, buffer });
+            return;
+        }
+
+        try {
+            await this.sendDiscordMessage({
+                embed: {
+                    title: `Log file rotated`,
+                    color: 0x00FF00,
+                    timestamp: (new Date()).toISOString(),
+                    footer: {
+                        text: `${this.server.serverName}`
+                    }
+                }
+            });
+            await this.sendDiscordMessage({
+                files: [
+                    new AttachmentBuilder(buffer, { name: fileName })
+                ]
+            });
+        } catch (error) {
+            this.verbose(1, `Error sending Discord message: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async processLogQueue() {
+        while (this.logQueue.length > 0) {
+            const { fileName, buffer } = this.logQueue.shift();
+            try {
+                await this.discordMessage(fileName, buffer);
+            } catch (error) {
+                this.verbose(1, `Error processing queued log: ${error.message}`);
             }
         }
     }
